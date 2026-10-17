@@ -1,0 +1,165 @@
+{
+  "name": "ai-limit-status",
+  "displayName": "AI Limit Status",
+  "description": "Displays Codex, Gemini, Argon, Other, and Claude subscription limits in one VS Code extension.",
+  "version": "1.3.6",
+  "publisher": "local-tools",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "icons": {
+      "ai-limit-codex": {
+        "description": "Codex brand mark",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\ea02"
+        }
+      },
+      "ai-limit-gemini": {
+        "description": "Gemini brand mark",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\ea03"
+        }
+      },
+      "ai-limit-claude": {
+        "description": "Claude brand mark",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\ea01"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "codexUsage.refresh",
+        "title": "AI Limit Status: Refresh Limits"
+      },
+      {
+        "command": "codexUsage.openMenu",
+        "title": "AI Limit Status: Open Dashboard"
+      },
+      {
+        "command": "codexUsage.consumeResetCredit",
+        "title": "Codex Usage: Use a Reset Credit"
+      }
+    ],
+    "configuration": {
+      "title": "AI Limit Status",
+      "properties": {
+        "aiQuotaStatus.visibleProviders": {
+          "type": "array",
+          "default": [
+            "codex",
+            "gemini",
+            "claude"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "gemini",
+              "claude"
+            ]
+          },
+          "description": "Provider groups shown in the status bar. All providers remain visible in the dashboard.",
+          "scope": "machine"
+        },
+        "codexUsage.refreshIntervalSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 60,
+          "maximum": 3600,
+          "description": "How often to refresh all provider limits, in seconds."
+        },
+        "codexUsage.codexExecutable": {
+          "type": "string",
+          "default": "codex",
+          "description": "Path to the Codex CLI executable. On Windows, use the path to codex.exe."
+        },
+        "aiQuotaStatus.visibleIndicators": {
+          "type": "array",
+          "default": [
+            "codex",
+            "gemini",
+            "gptClaude",
+            "argon",
+            "claude"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "gemini",
+              "gptClaude",
+              "argon",
+              "claude"
+            ]
+          },
+          "description": "Individual quota indicators shown in the status bar."
+        },
+        "aiQuotaStatus.statusBarStyle": {
+          "type": "string",
+          "enum": [
+            "full",
+            "compact",
+            "icon"
+          ],
+          "default": "full",
+          "description": "Status bar presentation: full labels, compact percentages, or icons only."
+        },
+        "aiQuotaStatus.showIcons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show provider icons. Icon-only mode always shows icons."
+        },
+        "aiQuotaStatus.showResetTime": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show reset countdowns in the status bar."
+        },
+        "aiQuotaStatus.showResetCredits": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Codex reset credits when available."
+        },
+        "aiQuotaStatus.colorize": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use muted warning colors for low remaining quotas."
+        },
+        "aiQuotaStatus.panelTheme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
+          "default": "auto",
+          "description": "Dashboard color theme."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "check-types": "tsc -p ./ --noEmit",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.8.3"
+  }
+}
