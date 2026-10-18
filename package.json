@@ -37,6 +37,153 @@
           "fontPath": "./media/fonts/ai-limit-brand.woff",
           "fontCharacter": "\\ea01"
         }
+      },
+      "ai-limit-ring-0": {
+        "description": "0% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb00"
+        }
+      },
+      "ai-limit-ring-5": {
+        "description": "5% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb01"
+        }
+      },
+      "ai-limit-ring-10": {
+        "description": "10% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb02"
+        }
+      },
+      "ai-limit-ring-15": {
+        "description": "15% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb03"
+        }
+      },
+      "ai-limit-ring-20": {
+        "description": "20% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb04"
+        }
+      },
+      "ai-limit-ring-25": {
+        "description": "25% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb05"
+        }
+      },
+      "ai-limit-ring-30": {
+        "description": "30% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb06"
+        }
+      },
+      "ai-limit-ring-35": {
+        "description": "35% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb07"
+        }
+      },
+      "ai-limit-ring-40": {
+        "description": "40% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb08"
+        }
+      },
+      "ai-limit-ring-45": {
+        "description": "45% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb09"
+        }
+      },
+      "ai-limit-ring-50": {
+        "description": "50% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0a"
+        }
+      },
+      "ai-limit-ring-55": {
+        "description": "55% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0b"
+        }
+      },
+      "ai-limit-ring-60": {
+        "description": "60% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0c"
+        }
+      },
+      "ai-limit-ring-65": {
+        "description": "65% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0d"
+        }
+      },
+      "ai-limit-ring-70": {
+        "description": "70% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0e"
+        }
+      },
+      "ai-limit-ring-75": {
+        "description": "75% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb0f"
+        }
+      },
+      "ai-limit-ring-80": {
+        "description": "80% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb10"
+        }
+      },
+      "ai-limit-ring-85": {
+        "description": "85% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb11"
+        }
+      },
+      "ai-limit-ring-90": {
+        "description": "90% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb12"
+        }
+      },
+      "ai-limit-ring-95": {
+        "description": "95% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb13"
+        }
+      },
+      "ai-limit-ring-100": {
+        "description": "100% quota remaining ring",
+        "default": {
+          "fontPath": "./media/fonts/ai-limit-brand.woff",
+          "fontCharacter": "\\eb14"
+        }
       }
     },
     "commands": [
@@ -154,12 +301,15 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "check-types": "tsc -p ./ --noEmit",
+    "build:font": "node scripts/build-font.js",
     "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^4.0.0",
+    "opentype.js": "^2.0.0",
+    "ttf2woff": "^3.0.0",
     "typescript": "^5.8.3"
   }
 }

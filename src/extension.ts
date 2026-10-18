@@ -23,6 +23,7 @@ import {
   IndicatorId,
   ProviderId,
   QuotaWindow,
+  getRingIcon,
   statusText,
 } from "./dashboard-model";
 
@@ -363,7 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
             bucket.window === "weekly" ? "Weekly limit" : "5-hour limit";
           const resetLabel =
             bucket.window === "weekly" ? "Weekly reset" : "Reset";
-          return `${bucketLabel}: %${getAntigravityRemainingPercent(bucket)} remaining · ${resetLabel}: ${formatRemainingTime(getAntigravityResetTimestamp(bucket.resetTime))}`;
+          return `${bucketLabel}: ${getAntigravityRemainingPercent(bucket)}% remaining · ${resetLabel}: ${formatRemainingTime(getAntigravityResetTimestamp(bucket.resetTime))}`;
         }),
         antigravityLastUpdatedAt
           ? `Last updated: ${antigravityLastUpdatedAt.toLocaleTimeString("en-US")}`
@@ -1030,10 +1031,12 @@ function antigravityStatusText(
 
   const title = settings.statusBarStyle === "full" ? `${label} ` : "";
   const bucket = selectAntigravityStatusBucket(buckets);
+  const remaining = getAntigravityRemainingPercent(bucket);
+  const ring = getRingIcon(remaining);
   const resetTime = settings.showResetTime
     ? ` · ${formatRemainingTime(getAntigravityResetTimestamp(bucket.resetTime))}`
     : "";
-  return `${prefix}${title}%${getAntigravityRemainingPercent(bucket)}${resetTime}`;
+  return `${prefix}${title}${remaining}% ${ring}${resetTime}`;
 }
 
 function getAntigravityRemainingPercent(

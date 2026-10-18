@@ -32,6 +32,15 @@
     Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const tone = (value) =>
     value < 10 ? "danger" : value < 20 ? "orange" : value < 30 ? "warning" : "";
+  const renderProgressRing = (value, toneClass = "", size = 16) => {
+    const val = percent(value);
+    const r = (size - 3) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+    const offset = circumference * (1 - val / 100);
+    return `<svg class="progress-ring ${toneClass}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" stroke-width="2.2" fill="none" /><circle class="ring-fill" cx="${cx}" cy="${cy}" r="${r}" stroke-width="2.2" fill="none" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 ${cx} ${cy})" /></svg>`;
+  };
   const selectStatusWindow = (windows) => {
     const fiveHour = windows.find((w) => /5\s?[- ]?hour|5h/i.test(w.label));
     const weekly = windows.find((w) => /week/i.test(w.label));
@@ -92,7 +101,7 @@
           <div class="page-heading"><div><p class="eyebrow">MADE FOR YOU</p><h1>Customize your view.</h1><p>Adjust the status bar and dashboard to fit your workflow. Changes save automatically.</p></div></div>
           <div class="settings-layout"><div class="settings-stack">
             <div class="settings-card"><h2>Visible providers</h2><p>All limits remain available in the dashboard.</p><div id="provider-options"></div><h3>Individual quota indicators</h3><div id="indicator-options"></div></div>
-            <div class="settings-card"><h2>Status bar style</h2><div class="style-options"><label><input type="radio" name="statusBarStyle" value="full"><span><strong>Full</strong><small>Codex %72 · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="compact"><span><strong>Compact</strong><small>⌘ %72 · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="icon"><span><strong>Icons only</strong><small>OpenAI · Gemini · Claude</small></span></label></div><div id="toggle-options"></div></div>
+            <div class="settings-card"><h2>Status bar style</h2><div class="style-options"><label><input type="radio" name="statusBarStyle" value="full"><span><strong>Full</strong><small>Codex 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="compact"><span><strong>Compact</strong><small>⌘ 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="icon"><span><strong>Icons only</strong><small>OpenAI · Gemini · Claude</small></span></label></div><div id="toggle-options"></div></div>
             <div class="settings-card"><h2>Dashboard and updates</h2><label class="setting-row"><span><strong>Dashboard theme</strong><small>Automatic mode follows your VS Code theme.</small></span><select id="panelTheme" aria-label="Dashboard theme"><option value="auto">Match VS Code</option><option value="dark">Dark</option><option value="light">Light</option></select></label><label class="setting-row"><span><strong>Refresh interval</strong><small>60–3600 seconds for all providers.</small></span><span class="interval-input"><input id="refreshIntervalSeconds" type="number" min="60" max="3600" step="1" aria-label="Refresh interval (seconds)"><span>sec</span></span></label></div>
           </div><aside class="preview-card"><p class="eyebrow">LIVE PREVIEW</p><h2>Your status bar</h2><p>This preview reflects your current settings.</p><div class="editor-preview"><div class="editor-tabs"><i></i><i></i><i></i><span>workspace</span></div><div class="editor-lines"><span></span><span></span><span></span><span></span></div><div id="bar-preview" class="bar-preview"></div></div><p class="preview-caption">Colors reflect the remaining quota:</p><div class="thresholds"><span class="warning">● &lt; 30%</span><span class="orange">● &lt; 20%</span><span class="danger">● &lt; 10%</span></div><p class="preview-caption">If all indicators are hidden, open the dashboard from the Command Palette: “AI Limit Status: Open Dashboard.”</p></aside></div>
         </section>
@@ -127,7 +136,7 @@
     document.getElementById("providers").innerHTML = state.providers
       .map((provider) => {
         const account = provider.account;
-        return `<article class="provider-card ${provider.id}"><div class="provider-heading"><span class="provider-symbol">${providerIcon(provider.id)}</span><div><h2>${escape(provider.name)}</h2><span class="source">${escape(provider.source)}</span></div><span class="pill ${provider.error ? "offline" : "online"}">${provider.error ? "Action needed" : provider.windows.length ? "Updated" : "Waiting"}</span></div><div class="provider-account"><span>${escape(account?.email ?? (account?.connected ? "Active session" : "No session information"))}</span>${account?.plan ? `<span class="plan">${escape(account.plan)}</span>` : ""}</div><div class="quotas">${provider.windows.map((window) => `<div class="quota ${tone(window.remainingPercent)}"><div class="quota-title"><span>${escape(window.label)}</span><strong>${percent(window.remainingPercent)}% <small>left</small></strong></div><progress max="100" value="${percent(window.remainingPercent)}" aria-label="${escape(window.label)} remaining percentage"></progress><div class="quota-reset"><span>↻ Resets in ${escape(window.resetLabel)}</span><time>${window.resetsAt ? escape(dateTime(window.resetsAt * 1000)) : "Reset time unavailable"}</time></div></div>`).join("") || `<div class="empty-quota"><span>◌</span><p>No limit data yet.</p></div>`}</div>${provider.error ? `<div class="provider-error">${escape(provider.error)}</div>` : ""}<div class="provider-footer"><span>${escape(dateTime(provider.updatedAt))}</span><button class="text-button" data-login="${provider.id}">Manage account ↗</button></div></article>`;
+        return `<article class="provider-card ${provider.id}"><div class="provider-heading"><span class="provider-symbol">${providerIcon(provider.id)}</span><div><h2>${escape(provider.name)}</h2><span class="source">${escape(provider.source)}</span></div><span class="pill ${provider.error ? "offline" : "online"}">${provider.error ? "Action needed" : provider.windows.length ? "Updated" : "Waiting"}</span></div><div class="provider-account"><span>${escape(account?.email ?? (account?.connected ? "Active session" : "No session information"))}</span>${account?.plan ? `<span class="plan">${escape(account.plan)}</span>` : ""}</div><div class="quotas">${provider.windows.map((window) => `<div class="quota ${tone(window.remainingPercent)}"><div class="quota-title"><span>${escape(window.label)}</span><strong class="quota-percentage"><span>${percent(window.remainingPercent)}%</span>${renderProgressRing(window.remainingPercent, tone(window.remainingPercent), 16)}<small>left</small></strong></div><progress max="100" value="${percent(window.remainingPercent)}" aria-label="${escape(window.label)} remaining percentage"></progress><div class="quota-reset"><span>↻ Resets in ${escape(window.resetLabel)}</span><time>${window.resetsAt ? escape(dateTime(window.resetsAt * 1000)) : "Reset time unavailable"}</time></div></div>`).join("") || `<div class="empty-quota"><span>◌</span><p>No limit data yet.</p></div>`}</div>${provider.error ? `<div class="provider-error">${escape(provider.error)}</div>` : ""}<div class="provider-footer"><span>${escape(dateTime(provider.updatedAt))}</span><button class="text-button" data-login="${provider.id}">Manage account ↗</button></div></article>`;
       })
       .join("");
     document.getElementById("reset-card").innerHTML =
@@ -251,9 +260,13 @@
       const window = selectStatusWindow(windows);
       const iconOnly = s.statusBarStyle === "icon";
       const icon = s.showIcons || iconOnly ? providerIcon(p.id) + " " : "";
+      const ringHtml = window
+        ? " " + renderProgressRing(window.remainingPercent, s.colorize ? tone(window.remainingPercent) : "", 14)
+        : "";
       const windowText = window
-        ? "%" +
-          window.remainingPercent +
+        ? window.remainingPercent +
+          "%" +
+          ringHtml +
           (s.showResetTime ? " · " + escape(window.resetLabel) : "")
         : "—";
       const text = iconOnly

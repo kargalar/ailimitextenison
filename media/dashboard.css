@@ -442,6 +442,32 @@ p {
 .quota-title > span {
   padding-top: 3px;
 }
+.quota-percentage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.progress-ring {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.progress-ring .ring-track {
+  stroke: var(--line, rgba(255, 255, 255, 0.14));
+}
+.progress-ring .ring-fill {
+  stroke: var(--green, #4e7c3d);
+  transition: stroke-dashoffset 0.3s ease;
+}
+.progress-ring.warning .ring-fill {
+  stroke: var(--yellow, #d9a74a);
+}
+.progress-ring.orange .ring-fill {
+  stroke: var(--orange, #e07a3c);
+}
+.progress-ring.danger .ring-fill {
+  stroke: var(--red, #cf5656);
+}
 progress {
   width: 100%;
   height: 5px;
@@ -965,6 +991,14 @@ input[type="number"] {
   width: 14px;
   height: 14px;
   vertical-align: middle;
+}
+.bar-preview span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.bar-preview .progress-ring {
+  margin: 0 1px;
 }
 .preview-caption {
   font-size: 10px !important;

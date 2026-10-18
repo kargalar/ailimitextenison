@@ -131,6 +131,12 @@ export function validateSettings(value: unknown): Partial<DisplaySettings> {
   return result;
 }
 
+export function getRingIcon(remaining: number): string {
+  const clamped = Math.max(0, Math.min(100, remaining));
+  const step = Math.round(clamped / 5) * 5;
+  return `$(ai-limit-ring-${step})`;
+}
+
 export function statusText(
   icon: string,
   label: string,
@@ -142,6 +148,8 @@ export function statusText(
   const prefix = settings.showIcons || iconOnly ? `${icon} ` : "";
   if (iconOnly) return prefix.trim();
   const title = settings.statusBarStyle === "full" ? `${label} ` : "";
+  const ring = getRingIcon(remaining);
   const countdown = settings.showResetTime ? ` · ${resetTime}` : "";
-  return `${prefix}${title}%${remaining}${countdown}`;
+  return `${prefix}${title}${remaining}% ${ring}${countdown}`;
 }
+
