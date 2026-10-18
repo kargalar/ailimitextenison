@@ -485,7 +485,10 @@ export function activate(context: vscode.ExtensionContext): void {
             group.buckets.map((bucket) => {
               const resetsAt = getAntigravityResetTimestamp(bucket.resetTime);
               return {
-                label: group.label,
+                label:
+                  group.label +
+                  " · " +
+                  (bucket.window === "weekly" ? "Weekly" : "5-hour"),
                 remainingPercent: getAntigravityRemainingPercent(bucket),
                 resetsAt: resetsAt ? resetsAt * 1000 : undefined,
                 resetLabel: formatRemainingTime(resetsAt),

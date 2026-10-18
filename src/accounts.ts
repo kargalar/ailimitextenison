@@ -1930,18 +1930,6 @@ export class AccountDirectory {
           typeof weeklyBucket.remainingFraction === "number" &&
           weeklyBucket.remainingFraction <= 0;
 
-        const bucket = buckets[0];
-        if (!bucket) continue;
-        let frac =
-          typeof bucket.remainingFraction === "number"
-            ? bucket.remainingFraction
-            : 1;
-        if (isWeeklyZero) {
-          frac = 0;
-        }
-        const resetTimeStr =
-          typeof bucket.resetTime === "string" ? bucket.resetTime : undefined;
-        const resetsAt = resetTimeStr ? Date.parse(resetTimeStr) : undefined;
         const shortLabel = /argon/i.test(groupName)
           ? "Argon"
           : /gemini/i.test(groupName)
@@ -1949,12 +1937,33 @@ export class AccountDirectory {
             : /claude|gpt/i.test(groupName)
               ? "GPT/Claude"
               : groupName;
-        windows.push({
-          label: shortLabel,
-          remainingPercent: clampPercent(frac * 100),
-          resetsAt: Number.isFinite(resetsAt) ? resetsAt : undefined,
-          resetLabel: formatCountdownFromEpochMs(resetsAt),
-        });
+
+        for (const bucket of buckets) {
+          if (!bucket || typeof bucket !== "object") continue;
+          const b = bucket as Record<string, unknown>;
+          const windowType =
+            b.window === "weekly"
+              ? "Weekly"
+              : b.window === "5h"
+                ? "5-hour"
+                : typeof b.window === "string"
+                  ? b.window
+                  : "";
+          let frac =
+            typeof b.remainingFraction === "number" ? b.remainingFraction : 1;
+          if (b.window === "5h" && isWeeklyZero) {
+            frac = 0;
+          }
+          const resetTimeStr =
+            typeof b.resetTime === "string" ? b.resetTime : undefined;
+          const resetsAt = resetTimeStr ? Date.parse(resetTimeStr) : undefined;
+          windows.push({
+            label: windowType ? `${shortLabel} · ${windowType}` : shortLabel,
+            remainingPercent: clampPercent(frac * 100),
+            resetsAt: Number.isFinite(resetsAt) ? resetsAt : undefined,
+            resetLabel: formatCountdownFromEpochMs(resetsAt),
+          });
+        }
       }
     }
 

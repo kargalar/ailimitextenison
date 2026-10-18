@@ -294,17 +294,21 @@
       return `<div class="saved-account-quotas empty"><span>Kota bilgisi bekleniyor — yenilemek için ↻ butonuna tıklayın</span></div>`;
     }
 
-    const hasZeroWeekly = wins.some(
-      (w) =>
-        /week|7d/i.test(w.label) &&
-        percent(w.remainingPercent) === 0,
-    );
+    const getGroupPrefix = (label) =>
+      label.includes("·") ? label.split("·")[0].trim().toLowerCase() : "";
 
     return `<div class="saved-account-quotas">
       ${wins
         .map((w) => {
           let pct = percent(w.remainingPercent);
-          if (hasZeroWeekly && /5\s?[- ]?hour|5h/i.test(w.label)) {
+          const groupPrefix = getGroupPrefix(w.label);
+          const hasZeroWeeklyForGroup = wins.some(
+            (other) =>
+              getGroupPrefix(other.label) === groupPrefix &&
+              /week|7d/i.test(other.label) &&
+              percent(other.remainingPercent) === 0,
+          );
+          if (hasZeroWeeklyForGroup && /5\s?[- ]?hour|5h/i.test(w.label)) {
             pct = 0;
           }
           const t = tone(pct);
