@@ -1,19 +1,13 @@
 import * as vscode from "vscode";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import * as http from "node:http";
 import * as https from "node:https";
-import {
-  AccountLoginFlow,
-  AccountDirectory,
-  readClaudeAccount,
-  startAccountLogin,
-} from "./accounts";
+import { AccountDirectory, readClaudeAccount } from "./accounts";
 import { Dashboard } from "./dashboard";
 import {
   AccountIdentity,
@@ -49,7 +43,7 @@ const ANTIGRAVITY_USAGE_API_PATH =
 const CLIENT_INFO = {
   name: "ai-limit-status-vscode",
   title: "AI Limit Status",
-  version: "1.3.3",
+  version: "1.4.2",
 };
 
 const POWERSHELL_CONNECTION_SCRIPT = String.raw`
@@ -149,9 +143,8 @@ type RenderedWindow = {
 };
 
 export function activate(context: vscode.ExtensionContext): void {
-  const accounts = new AccountDirectory(context);
-  const accountLoginFlows = new Map<vscode.Terminal, AccountLoginFlow>();
   let dashboard: Dashboard | undefined;
+  const accounts = new AccountDirectory(context, () => dashboard?.publish());
   let dashboardRefreshing = false;
   let codexErrorMessage: string | undefined;
   let antigravityIdentity: AccountIdentity = {
@@ -188,16 +181,16 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.StatusBarAlignment.Right,
         97,
       ),
-      key: "gptClaude",
-      label: "Other",
+      key: "argon",
+      label: "Argon",
     },
     {
       item: vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
         96,
       ),
-      key: "argon",
-      label: "Argon",
+      key: "gptClaude",
+      label: "Other",
     },
   ];
   item.command = "codexUsage.openMenu";
@@ -458,33 +451,105 @@ export function activate(context: vscode.ExtensionContext): void {
     if (antigravityRefreshInProgress) return;
     antigravityRefreshInProgress = true;
     try {
-      const response = await fetchAntigravityQuota();
-      antigravityIdentity = {
-        provider: "gemini",
-        connected: true,
-        email:
-          typeof response.userStatus?.email === "string"
-            ? response.userStatus.email
-            : undefined,
-        name:
-          typeof response.userStatus?.name === "string"
-            ? response.userStatus.name
-            : undefined,
-        plan:
-          typeof response.userStatus?.planStatus?.planInfo?.planName ===
-          "string"
-            ? response.userStatus.planStatus.planInfo.planName
-            : undefined,
-        detail: response.userStatus?.email
-          ? undefined
-          : "Connected to the local quota service; account email was not provided.",
-      };
-      antigravityGroups = parseAntigravityQuotaGroups(response);
-      antigravityErrorMessage =
-        antigravityGroups.length > 0
-          ? undefined
-          : "No available limits were found in the Antigravity quota response.";
-      antigravityLastUpdatedAt = new Date();
+      let localSucceeded = false;
+      try {
+        const response = await fetchAntigravityQuota();
+        const groups = parseAntigravityQuotaGroups(response);
+        if (groups.length > 0) {
+          antigravityGroups = groups;
+          antigravityIdentity = {
+            provider: "gemini",
+            connected: true,
+            email:
+              typeof response.userStatus?.email === "string"
+                ? response.userStatus.email
+                : undefined,
+            name:
+              typeof response.userStatus?.name === "string"
+                ? response.userStatus.name
+                : undefined,
+            plan:
+              typeof response.userStatus?.planStatus?.planInfo?.planName ===
+              "string"
+                ? response.userStatus.planStatus.planInfo.planName
+                : undefined,
+            detail: response.userStatus?.email
+              ? undefined
+              : "Connected to the local quota service; account email was not provided.",
+          };
+          antigravityErrorMessage = undefined;
+          antigravityLastUpdatedAt = new Date();
+          localSucceeded = true;
+
+          const localWindows: QuotaWindow[] = groups.flatMap((group) =>
+            group.buckets.map((bucket) => {
+              const resetsAt = getAntigravityResetTimestamp(bucket.resetTime);
+              return {
+                label: group.label,
+                remainingPercent: getAntigravityRemainingPercent(bucket),
+                resetsAt: resetsAt ? resetsAt * 1000 : undefined,
+                resetLabel: formatRemainingTime(resetsAt),
+              };
+            }),
+          );
+          await accounts.syncActiveAccountWindows(
+            "gemini",
+            localWindows,
+            antigravityIdentity,
+          );
+        }
+      } catch {
+        localSucceeded = false;
+      }
+
+      if (!localSucceeded) {
+        const activeGeminiAccount = accounts
+          .list()
+          .find((a) => a.provider === "gemini" && a.active);
+
+        if (
+          activeGeminiAccount &&
+          activeGeminiAccount.windows &&
+          activeGeminiAccount.windows.length > 0
+        ) {
+          antigravityIdentity = {
+            provider: "gemini",
+            connected: true,
+            email: activeGeminiAccount.email,
+            name: activeGeminiAccount.name,
+            plan: activeGeminiAccount.plan,
+          };
+          antigravityGroups = activeGeminiAccount.windows.map((w) => {
+            const isArgon = /argon/i.test(w.label);
+            const isGemini = /gemini/i.test(w.label);
+            return {
+              key: isArgon ? "argon" : isGemini ? "gemini" : "gptClaude",
+              label: isArgon ? "Argon" : isGemini ? "Gemini" : "Other",
+              buckets: [
+                {
+                  window: "weekly",
+                  remainingFraction: w.remainingPercent / 100,
+                  resetTime: w.resetsAt
+                    ? new Date(w.resetsAt).toISOString()
+                    : undefined,
+                },
+              ],
+            };
+          });
+          antigravityErrorMessage = undefined;
+          antigravityLastUpdatedAt = new Date();
+        } else {
+          antigravityErrorMessage =
+            "No available limits were found in the Antigravity quota response.";
+          antigravityGroups = [];
+          antigravityIdentity = {
+            provider: "gemini",
+            connected: false,
+            detail: antigravityErrorMessage,
+          };
+        }
+      }
+
       updateAntigravityStatus();
     } catch (error) {
       antigravityErrorMessage =
@@ -511,6 +576,10 @@ export function activate(context: vscode.ExtensionContext): void {
     dashboardRefreshing = true;
     dashboard?.publish();
     try {
+      await accounts.ensureInitialized();
+      await accounts.discoverLocalAccounts();
+      await accounts.refreshAllAccountQuotas();
+
       const [codexAccount, claudeAccount] = await Promise.all([
         appServerRequest<{
           account?: { type: string; email?: string; planType?: string };
@@ -523,11 +592,24 @@ export function activate(context: vscode.ExtensionContext): void {
             detail:
               account?.type === "apiKey" ? "API key session" : undefined,
           }))
-          .catch((): AccountIdentity => ({
-            provider: "codex",
-            connected: false,
-            detail: "Could not read the Codex session.",
-          })),
+          .catch((): AccountIdentity => {
+            const activeCodex = accounts
+              .list()
+              .find((a) => a.provider === "codex" && a.active);
+            return activeCodex
+              ? {
+                  provider: "codex",
+                  connected: true,
+                  email: activeCodex.email,
+                  name: activeCodex.name,
+                  plan: activeCodex.plan,
+                }
+              : {
+                  provider: "codex",
+                  connected: false,
+                  detail: "Could not read the Codex session.",
+                };
+          }),
         readClaudeAccount(),
       ]);
       await accounts.record([codexAccount, claudeAccount]);
@@ -536,7 +618,9 @@ export function activate(context: vscode.ExtensionContext): void {
         refreshClaude(showErrors),
         refreshAntigravity(showErrors),
       ]);
-      await accounts.record([antigravityIdentity]);
+      if (antigravityIdentity.connected) {
+        await accounts.record([antigravityIdentity]);
+      }
     } finally {
       dashboardRefreshing = false;
       dashboard?.publish();
@@ -624,6 +708,17 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const getDashboardState = (): DashboardState => {
+    const allAccounts = accounts.list();
+    const activeCodexAcc = allAccounts.find(
+      (a) => a.provider === "codex" && a.active,
+    );
+    const activeGeminiAcc = allAccounts.find(
+      (a) => a.provider === "gemini" && a.active,
+    );
+    const activeClaudeAcc = allAccounts.find(
+      (a) => a.provider === "claude" && a.active,
+    );
+
     const quotaWindows = (entries: RenderedWindow[]): QuotaWindow[] =>
       entries.map((entry) => ({
         label: entry.label,
@@ -631,55 +726,87 @@ export function activate(context: vscode.ExtensionContext): void {
         resetsAt: entry.resetsAt,
         resetLabel: formatRemainingTime(entry.resetsAt),
       }));
-    return {
-      providers: [
-        {
-          id: "codex",
-          name: "Codex",
-          source: "OpenAI • Codex CLI",
-          windows: quotaWindows(windows),
-          account: accounts.get("codex"),
-          updatedAt: lastUpdatedAt?.toISOString(),
-          error: codexErrorMessage,
-        },
-        {
-          id: "gemini",
-          name: "Gemini & Antigravity",
-          source: "Google • Antigravity",
-          account: accounts.get("gemini"),
-          updatedAt: antigravityLastUpdatedAt?.toISOString(),
-          error: antigravityErrorMessage,
-          windows: antigravityGroups.flatMap((group) =>
-            group.buckets.map((bucket) => {
+
+    const codexWins =
+      windows.length > 0
+        ? quotaWindows(windows)
+        : (activeCodexAcc?.windows ?? []);
+    const geminiWins =
+      antigravityGroups.length > 0
+        ? antigravityGroups.flatMap((group) => {
+            const weekly = group.buckets.find((b) => b.window === "weekly");
+            const isWeeklyZero =
+              weekly !== undefined &&
+              getAntigravityRemainingPercent(weekly) === 0;
+
+            return group.buckets.map((bucket) => {
               const resetsAt = getAntigravityResetTimestamp(bucket.resetTime);
+              const remaining =
+                bucket.window === "5h" && isWeeklyZero
+                  ? 0
+                  : getAntigravityRemainingPercent(bucket);
               return {
                 label:
                   group.label +
                   " · " +
                   (bucket.window === "weekly" ? "Weekly" : "5-hour"),
-                remainingPercent: getAntigravityRemainingPercent(bucket),
+                remainingPercent: remaining,
                 resetsAt,
                 resetLabel: formatRemainingTime(resetsAt),
               };
-            }),
-          ),
+            });
+          })
+        : (activeGeminiAcc?.windows ?? []);
+    const claudeWins =
+      claudeWindows.length > 0
+        ? quotaWindows(claudeWindows)
+        : (activeClaudeAcc?.windows ?? []);
+
+    const mappedAccounts = allAccounts.map((acc) => {
+      if (acc.provider === "gemini" && acc.active && geminiWins.length > 0) {
+        return { ...acc, windows: geminiWins };
+      }
+      return acc;
+    });
+
+    return {
+      providers: [
+        {
+          id: "codex",
+          name: "Codex",
+          source: "OpenAI • Codex OAuth",
+          windows: codexWins,
+          account: activeCodexAcc ?? accounts.get("codex"),
+          updatedAt: lastUpdatedAt?.toISOString(),
+          error: codexWins.length > 0 ? undefined : codexErrorMessage,
+        },
+        {
+          id: "gemini",
+          name: "Gemini & Antigravity",
+          source: "Google • CloudCode OAuth",
+          account: activeGeminiAcc ?? accounts.get("gemini"),
+          updatedAt: antigravityLastUpdatedAt?.toISOString(),
+          error: geminiWins.length > 0 ? undefined : antigravityErrorMessage,
+          windows: geminiWins,
         },
         {
           id: "claude",
           name: "Claude",
-          source: "Anthropic • Claude Code",
-          windows: quotaWindows(claudeWindows),
-          account: accounts.get("claude"),
+          source: "Anthropic • Claude OAuth",
+          windows: claudeWins,
+          account: activeClaudeAcc ?? accounts.get("claude"),
           updatedAt: claudeLastUpdatedAt?.toISOString(),
-          error: claudeErrorMessage,
+          error: claudeWins.length > 0 ? undefined : claudeErrorMessage,
         },
       ],
-      accounts: accounts.list(),
+      accounts: mappedAccounts,
       settings: getDisplaySettings(),
       resetCredits: availableResetCount ?? 0,
       refreshing: dashboardRefreshing,
+      oauthSession: accounts.getOAuthSessionView(),
     };
   };
+
   dashboard = new Dashboard(context, getDashboardState, {
     refresh: () => refreshAll(false),
     save: async (settings) => {
@@ -691,36 +818,52 @@ export function activate(context: vscode.ExtensionContext): void {
           .update(key, value, vscode.ConfigurationTarget.Global);
       }
     },
-    login: async (provider, email) => {
-      const flow = await startAccountLogin(
-        provider,
-        resolveCodexExecutable,
-        context.globalStorageUri.fsPath,
-        email,
+    prepareOAuth: async (provider) => {
+      await accounts.prepareOAuthSession(provider);
+      dashboard?.publish();
+    },
+    openExternalUrl: async (url) => {
+      await vscode.env.openExternal(vscode.Uri.parse(url));
+    },
+    copyText: async (text) => {
+      await vscode.env.clipboard.writeText(text);
+    },
+    completeOAuth: async (sessionId, callbackInput) => {
+      const added = await accounts.completeOAuthManual(
+        sessionId,
+        callbackInput,
       );
-      if (!flow) return "managed";
-      accountLoginFlows.set(flow.terminal, flow);
-      return "isolated";
+      await refreshAll(false);
+      return added.email ?? added.provider;
+    },
+    cancelOAuth: async () => {
+      accounts.cancelOAuthSession();
+      dashboard?.publish();
+    },
+    importAccountJson: async (provider, rawJson) => {
+      const added = await accounts.importAccountFromJson(provider, rawJson);
+      await refreshAll(false);
+      return added.email ?? added.provider;
     },
     switchAccount: async (provider, id) => {
-      if (provider === "gemini") {
-        const account = accounts
-          .list()
-          .find((entry) => entry.id === id && entry.provider === provider);
-        await startAccountLogin(
-          provider,
-          resolveCodexExecutable,
-          context.globalStorageUri.fsPath,
-          account?.email,
-        );
-        return "manage";
-      }
-      await refreshAll(false);
       await accounts.switchTo(id, provider);
-      await refreshAll(false);
-      return "switched";
+      await accounts.refreshAccountQuota(id);
+      await Promise.all([
+        refresh(false),
+        refreshClaude(false),
+        refreshAntigravity(false),
+      ]);
+      const target = accounts.list().find((a) => a.id === id);
+      return target?.email ?? provider;
     },
-    forget: (id) => accounts.forget(id),
+    refreshAccount: async (id) => {
+      await accounts.refreshAccountQuota(id);
+      dashboard?.publish();
+    },
+    forget: async (id) => {
+      await accounts.forget(id);
+      dashboard?.publish();
+    },
     reset: async () => {
       await useResetCredit();
       dashboard?.publish();
@@ -761,65 +904,11 @@ export function activate(context: vscode.ExtensionContext): void {
         dashboard?.publish();
       }
     }),
-    vscode.window.onDidCloseTerminal((terminal) => {
-      const loginFlow = accountLoginFlows.get(terminal);
-      if (loginFlow) {
-        accountLoginFlows.delete(terminal);
-        void (async () => {
-          const sourcePath = join(
-            loginFlow.profileDirectory,
-            loginFlow.provider === "codex" ? "auth.json" : ".credentials.json",
-          );
-          try {
-            if (!isFile(sourcePath)) {
-              void vscode.window.showInformationMessage(
-                "No new account was saved. Your current session remains active.",
-              );
-              return;
-            }
-
-            let identity: AccountIdentity;
-            if (loginFlow.provider === "codex") {
-              const { account } = await appServerRequest<{
-                account?: { email?: string; planType?: string };
-              }>(
-                "account/read",
-                { refreshToken: false },
-                { CODEX_HOME: loginFlow.profileDirectory },
-              );
-              identity = {
-                provider: "codex",
-                connected: !!account,
-                email: account?.email,
-                plan: account?.planType,
-              };
-            } else {
-              identity = await readClaudeAccount(loginFlow.profileDirectory);
-            }
-
-            await accounts.saveLoginSession(identity, sourcePath);
-            dashboard?.publish();
-            void vscode.window.showInformationMessage(
-              `${identity.email} was added. Your current ${loginFlow.provider === "codex" ? "Codex" : "Claude"} session remains active.`,
-            );
-          } catch (error) {
-            void vscode.window.showErrorMessage(
-              `Could not save the new account: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          } finally {
-            await rm(loginFlow.profileDirectory, {
-              recursive: true,
-              force: true,
-            }).catch(() => undefined);
-          }
-        })();
-        return;
-      }
-      if (/^(Codex|Claude|Antigravity) •/.test(terminal.name))
-        void refreshAll(false);
-    }),
     {
-      dispose: () => clearInterval(countdownTimer),
+      dispose: () => {
+        clearInterval(countdownTimer);
+        accounts.cancelOAuthSession();
+      },
     },
   );
   scheduleRefresh(context, refreshAll);
@@ -898,7 +987,7 @@ function selectCodexLimit(response: RateLimitResponse): RateLimit {
 }
 
 function renderWindows(rateLimit: RateLimit): RenderedWindow[] {
-  return [rateLimit.primary, rateLimit.secondary]
+  const list = [rateLimit.primary, rateLimit.secondary]
     .filter(
       (window): window is UsageWindow =>
         window !== null && window !== undefined,
@@ -921,6 +1010,17 @@ function renderWindows(rateLimit: RateLimit): RenderedWindow[] {
       };
     })
     .sort((left, right) => left.duration - right.duration);
+
+  const weekly = list.find((w) => w.duration >= 10080);
+  if (weekly && weekly.remainingPercent === 0) {
+    for (const w of list) {
+      if (w.duration <= 300) {
+        w.remainingPercent = 0;
+      }
+    }
+  }
+
+  return list;
 }
 
 function selectStatusWindow(windows: RenderedWindow[]): RenderedWindow {
@@ -946,7 +1046,7 @@ function renderClaudeWindows(response: ClaudeUsageResponse): RenderedWindow[] {
     { key: "seven_day_opus", label: "Opus weekly", duration: 10080 },
   ];
 
-  return usageWindows.flatMap(({ key, label, duration }) => {
+  const list = usageWindows.flatMap(({ key, label, duration }) => {
     const usageWindow = response[key];
     const utilization = usageWindow?.utilization;
     if (typeof utilization !== "number" || !Number.isFinite(utilization))
@@ -970,6 +1070,19 @@ function renderClaudeWindows(response: ClaudeUsageResponse): RenderedWindow[] {
       },
     ];
   });
+
+  const weeklyZero = list.some(
+    (w) => w.duration >= 10080 && w.remainingPercent === 0,
+  );
+  if (weeklyZero) {
+    for (const w of list) {
+      if (w.duration <= 300) {
+        w.remainingPercent = 0;
+      }
+    }
+  }
+
+  return list;
 }
 
 function parseAntigravityQuotaGroups(
@@ -985,6 +1098,20 @@ function parseAntigravityQuotaGroups(
           getAntigravityWindowOrder(right.window),
       );
     if (!sourceLabel || buckets.length === 0) return [];
+
+    const weeklyBucket = buckets.find((b) => b.window === "weekly");
+    const isWeeklyZero =
+      weeklyBucket !== undefined &&
+      typeof weeklyBucket.remainingFraction === "number" &&
+      weeklyBucket.remainingFraction <= 0;
+
+    if (isWeeklyZero) {
+      for (const bucket of buckets) {
+        if (bucket.window === "5h") {
+          bucket.remainingFraction = 0;
+        }
+      }
+    }
 
     const key = sourceLabel.includes("argon")
       ? "argon"
@@ -1029,7 +1156,12 @@ function antigravityStatusText(
   const prefix = settings.showIcons || iconOnly ? `${icon} ` : "";
   if (iconOnly) return prefix.trim();
 
-  const title = settings.statusBarStyle === "full" ? `${label} ` : "";
+  const title =
+    settings.statusBarStyle === "full"
+      ? `${label} `
+      : label !== "Gemini"
+        ? `${label} `
+        : "";
   const bucket = selectAntigravityStatusBucket(buckets);
   const remaining = getAntigravityRemainingPercent(bucket);
   const ring = getRingIcon(remaining);
@@ -1272,6 +1404,7 @@ function requestAntigravityQuota<T = AntigravityQuotaResponse>(
         extensionName: "antigravity",
         locale: "tr",
       },
+      forceRefresh: true,
     });
     const transport = protocol === "https" ? https : http;
     const request = transport.request(

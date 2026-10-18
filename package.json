@@ -2,7 +2,7 @@
   "name": "ai-limit-status",
   "displayName": "AI Limit Status",
   "description": "Displays Codex, Gemini, Argon, Other, and Claude subscription limits in one VS Code extension.",
-  "version": "1.3.6",
+  "version": "1.4.2",
   "publisher": "local-tools",
   "license": "MIT",
   "engines": {

@@ -32,18 +32,31 @@ export interface AccountIdentity {
   detail?: string;
 }
 
-export interface KnownAccount extends AccountIdentity {
-  id: string;
-  lastSeen: string;
-  active: boolean;
-  sessionSaved: boolean;
-}
-
 export interface QuotaWindow {
   label: string;
   remainingPercent: number;
   resetsAt?: number;
   resetLabel: string;
+}
+
+export interface KnownAccount extends AccountIdentity {
+  id: string;
+  lastSeen: string;
+  active: boolean;
+  sessionSaved: boolean;
+  windows?: QuotaWindow[];
+  updatedAt?: string;
+  error?: string;
+  status?: "ok" | "expired" | "error" | "loading";
+}
+
+export interface OAuthSessionView {
+  sessionId: string;
+  provider: ProviderId;
+  authUrl: string;
+  redirectUri: string;
+  status: "ready" | "waiting" | "exchanging" | "success" | "error";
+  message?: string;
 }
 
 export interface ProviderQuota {
@@ -62,6 +75,7 @@ export interface DashboardState {
   settings: DisplaySettings;
   resetCredits: number;
   refreshing: boolean;
+  oauthSession?: OAuthSessionView;
 }
 
 export function isProviderId(value: unknown): value is ProviderId {

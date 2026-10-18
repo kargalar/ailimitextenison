@@ -8,14 +8,17 @@ import {
   validateSettings,
 } from "./dashboard-model";
 
-interface DashboardActions {
+export interface DashboardActions {
   refresh(): Promise<void>;
   save(settings: Partial<DisplaySettings>): Promise<void>;
-  login(provider: ProviderId, email?: string): Promise<"isolated" | "managed">;
-  switchAccount(
-    provider: ProviderId,
-    id: string,
-  ): Promise<"switched" | "manage">;
+  prepareOAuth(provider: ProviderId): Promise<void>;
+  openExternalUrl(url: string): Promise<void>;
+  copyText(text: string): Promise<void>;
+  completeOAuth(sessionId: string, callbackInput: string): Promise<string>;
+  cancelOAuth(): Promise<void>;
+  importAccountJson(provider: ProviderId, rawJson: string): Promise<string>;
+  switchAccount(provider: ProviderId, id: string): Promise<string>;
+  refreshAccount(id: string): Promise<void>;
   forget(id: string): Promise<void>;
   reset(): Promise<void>;
 }
@@ -68,7 +71,9 @@ export class Dashboard implements vscode.Disposable {
         ).toString(),
       ]),
     );
-    panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; img-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><title>AI Limit Status</title><link rel="stylesheet" href="${style}"></head><body><div id="app"><p class="boot">Loading your limits…</p></div><script nonce="${nonce}">window.aiLimitIcons = ${JSON.stringify(icons).replace(/</g, "\\u003c")};</script><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    const pkg = this.context.extension.packageJSON as { version?: string };
+    const version = typeof pkg?.version === "string" ? pkg.version : "1.4.2";
+    panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; img-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><title>AI Limit Status v${version}</title><link rel="stylesheet" href="${style}"></head><body><div id="app"><p class="boot">Loading your limits…</p></div><script nonce="${nonce}">window.aiLimitIcons = ${JSON.stringify(icons).replace(/</g, "\\u003c")}; window.aiLimitVersion = ${JSON.stringify(version)};</script><script nonce="${nonce}" src="${script}"></script></body></html>`;
     panel.onDidDispose(() => {
       this.panel = undefined;
     });
@@ -95,6 +100,25 @@ export class Dashboard implements vscode.Disposable {
       this.publish();
       return;
     }
+
+    if (data.type === "copyText") {
+      if (typeof data.text === "string") {
+        await this.actions.copyText(data.text);
+        void this.panel?.webview.postMessage({
+          type: "notice",
+          message: "Authorization link copied to clipboard.",
+        });
+      }
+      return;
+    }
+
+    if (data.type === "openExternalUrl") {
+      if (typeof data.url === "string") {
+        await this.actions.openExternalUrl(data.url);
+      }
+      return;
+    }
+
     this.busy = true;
     this.publish();
     try {
@@ -105,42 +129,69 @@ export class Dashboard implements vscode.Disposable {
         case "save":
           await this.actions.save(validateSettings(data.settings));
           break;
+        case "prepareOAuth":
         case "login": {
-          if (!isProviderId(data.provider))
-            throw new Error("Invalid provider.");
-          let email: string | undefined;
-          if (typeof data.accountId === "string") {
-            const account = this.state().accounts.find(
-              (entry) =>
-                entry.id === data.accountId && entry.provider === data.provider,
-            );
-            if (!account) throw new Error("Account record not found.");
-            email = account.email;
-          }
-          const mode = await this.actions.login(data.provider, email);
+          const provider = isProviderId(data.provider)
+            ? data.provider
+            : "gemini";
+          await this.actions.prepareOAuth(provider);
+          break;
+        }
+        case "completeOAuth": {
+          const sessionId =
+            typeof data.sessionId === "string" ? data.sessionId : "";
+          const callbackUrl =
+            typeof data.callbackUrl === "string" ? data.callbackUrl : "";
+          const email = await this.actions.completeOAuth(
+            sessionId,
+            callbackUrl,
+          );
           void this.panel?.webview.postMessage({
             type: "notice",
-            message:
-              mode === "isolated"
-                ? `Sign in${email ? ` as ${email}` : ""} in the new terminal. Your current account stays active; the new session is saved when sign-in finishes.`
-                : "Antigravity account management is open. Add a Google account there; Antigravity controls which Gemini account is active.",
+            message: `Account ${email} added and quota loaded!`,
+          });
+          break;
+        }
+        case "cancelOAuth":
+          await this.actions.cancelOAuth();
+          break;
+        case "importAccountJson": {
+          if (!isProviderId(data.provider) || typeof data.rawJson !== "string")
+            throw new Error("Invalid import payload.");
+          const email = await this.actions.importAccountJson(
+            data.provider,
+            data.rawJson,
+          );
+          void this.panel?.webview.postMessage({
+            type: "notice",
+            message: `Account ${email} imported and quota loaded!`,
           });
           break;
         }
         case "switchAccount": {
-          if (!isProviderId(data.provider) || typeof data.accountId !== "string")
+          if (
+            !isProviderId(data.provider) ||
+            typeof data.accountId !== "string"
+          )
             throw new Error("Invalid account selection.");
-          const result = await this.actions.switchAccount(
+          const switchedEmail = await this.actions.switchAccount(
             data.provider,
             data.accountId,
           );
           void this.panel?.webview.postMessage({
             type: "notice",
-            message:
-              result === "switched"
-                ? "Switched accounts and refreshed your limits."
-                : "Antigravity account management is open. Select an account, then refresh your limits.",
+            message: `Switched active ${data.provider.toUpperCase()} account to ${switchedEmail}.`,
           });
+          break;
+        }
+        case "refreshAccount": {
+          if (typeof data.accountId === "string") {
+            await this.actions.refreshAccount(data.accountId);
+            void this.panel?.webview.postMessage({
+              type: "notice",
+              message: "Account quota refreshed.",
+            });
+          }
           break;
         }
         case "forget":
@@ -155,7 +206,9 @@ export class Dashboard implements vscode.Disposable {
         type: "notice",
         error: true,
         message:
-          error instanceof Error ? error.message : "The operation could not be completed.",
+          error instanceof Error
+            ? error.message
+            : "The operation could not be completed.",
       });
     } finally {
       this.busy = false;

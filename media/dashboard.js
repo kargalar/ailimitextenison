@@ -8,14 +8,27 @@
     argon: "Argon",
     claude: "Claude",
   };
+  const providerFullNames = {
+    gemini: "Gemini / Antigravity",
+    codex: "OpenAI Codex",
+    claude: "Anthropic Claude",
+  };
   const icons = window.aiLimitIcons ?? {};
   const providerIcon = (provider) =>
     `<img src="${escape(icons[provider] ?? "")}" alt="" aria-hidden="true">`;
   let state;
   let busy = false;
-  let section = vscode.getState()?.section ?? "limits";
-  if (!["limits", "accounts", "appearance"].includes(section))
-    section = "limits";
+  let section = vscode.getState()?.section ?? "accounts";
+  if (!["accounts", "appearance"].includes(section))
+    section = "accounts";
+
+  let accountFilter = "all";
+  let modalOpen = false;
+  let modalProvider = "gemini";
+  let modalTab = "oauth";
+  let callbackDraft = "";
+  let jsonDraft = "";
+
   const escape = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -67,46 +80,62 @@
         })
       : "Not updated yet";
   const send = (type, data = {}) => vscode.postMessage({ type, ...data });
+
+  const appVersion = window.aiLimitVersion || "1.4.2";
+
   document.getElementById("app").innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand"><span class="brand-icon">✦</span><span>AI Limit<span class="brand-sub">STATUS</span></span></div>
+        <div class="brand"><span class="brand-icon">✦</span><div><span>AI Limit</span><span class="brand-sub">STATUS</span><span class="brand-version">v${escape(appVersion)}</span></div></div>
         <div class="nav-label">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          <button class="nav-item" data-section="limits"><span>◫</span> Limits <span class="nav-dot"></span></button>
-          <button class="nav-item" data-section="accounts"><span>◎</span> Accounts</button>
-          <button class="nav-item" data-section="appearance"><span>◈</span> Appearance</button>
+          <button class="nav-item" data-section="accounts"><span>◎</span> Hesaplar &amp; Limitler <span class="nav-dot"></span></button>
+          <button class="nav-item" data-section="appearance"><span>◈</span> Görünüm <span class="nav-dot"></span></button>
         </nav>
-        <div class="sidebar-note"><span class="connection-dot"></span> Connected to local sessions<p>Your limits stay under your control.</p></div>
+        <div class="sidebar-note"><span class="connection-dot"></span> Multi-account OAuth ready<p>Tüm hesaplarınızı ve limitlerinizi tek ekrandan yönetin.</p></div>
       </aside>
       <main>
-        <header class="topbar"><span>CONTROL CENTER</span><div class="toolbar"><span id="sync-state" role="status"></span><button class="button primary" id="refresh" data-action="refresh">↻ Refresh</button></div></header>
+        <header class="topbar"><span>CONTROL CENTER</span><div class="toolbar"><span id="sync-state" role="status"></span><button class="button" data-open-add="gemini">+ Yeni Hesap Ekle</button><button class="button primary" id="refresh" data-action="refresh">↻ Tümünü Yenile</button></div></header>
         <div id="notice" class="notice" role="status" hidden></div>
-        <section id="limits" class="section">
-          <div class="page-heading"><div><p class="eyebrow">LESS TRACKING, MORE CREATING</p><h1>All your limits in one place.</h1><p>See remaining usage and reset times at a glance.</p></div><span class="local-badge">● Live sessions</span></div>
-          <div id="summary" class="summary"></div>
-          <div class="section-heading"><h2>Your subscriptions</h2><span>Each usage window is shown separately</span></div>
-          <div id="providers" class="provider-grid"></div>
+        <section id="accounts" class="section">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">HESAP VE LİMİT MERKEZİ</p>
+              <h1>Hesaplarınız ve Limitleriniz</h1>
+              <p>Tüm ekli hesaplarınızın anlık kotaları, sıfırlanma süreleri ve tek tıkla hesap değiştirme.</p>
+            </div>
+            <button class="button primary" data-open-add="gemini">+ Yeni Hesap Ekle</button>
+          </div>
           <div id="reset-card"></div>
-          <p class="footer-note">Percentages show your remaining quota. Reset details come from each provider's latest response.</p>
-        </section>
-        <section id="accounts" class="section" hidden>
-          <div class="page-heading"><div><p class="eyebrow">YOUR CONNECTIONS</p><h1>Your accounts.</h1><p>View active sessions, switch accounts, or sign in with a new account.</p></div></div>
-          <div id="active-accounts" class="provider-grid"></div>
-          <div class="section-heading account-section-heading"><div><h2>Saved accounts</h2><span>Switch between sessions or manage an account</span></div><span id="account-count" class="account-count"></span></div>
+          <div class="section-heading account-section-heading">
+            <div class="account-filter-bar">
+              <div class="filter-pills" role="tablist" aria-label="Sağlayıcıya göre filtrele">
+                <button class="filter-pill active" data-filter="all">Tümü</button>
+                <button class="filter-pill" data-filter="gemini">Gemini / Antigravity</button>
+                <button class="filter-pill" data-filter="codex">Codex</button>
+                <button class="filter-pill" data-filter="claude">Claude</button>
+              </div>
+              <span id="account-count" class="account-count"></span>
+            </div>
+          </div>
           <div id="account-history" class="account-grid"></div>
-          <div class="info-note"><strong>How account switching works</strong><p>Codex and Claude sign-ins run in isolated profiles, so adding an account does not replace the current session. After sign-in finishes, the new session is saved in VS Code SecretStorage and can be selected from this list. Gemini accounts are managed by Antigravity.</p><p>Removing an account from this extension deletes its saved session and history entry; it does not sign out of the provider.</p></div>
+          <div class="info-note">
+            <strong>OAuth Giriş Linki &amp; Geri Dönüş Linki (Callback) ile Hesap Ekleme</strong>
+            <p><b>+ Yeni Hesap Ekle</b> butonuna tıklayarak Google, OpenAI veya Anthropic giriş bağlantısını alın. Tarayıcınızda açıp giriş yaptıktan sonra açılan sayfanın linkini (<code>http://localhost:.../?code=...</code>) yapıştırıp onaylayın.</p>
+            <p>Eklenen tüm hesaplar aynı anda kayıtlı tutulur, her birinin kalan token yüzdeleri ve sayaçları anlık güncellenir. İstediğiniz hesaba tek tıkla geçiş yapabilirsiniz.</p>
+          </div>
         </section>
         <section id="appearance" class="section" hidden>
-          <div class="page-heading"><div><p class="eyebrow">MADE FOR YOU</p><h1>Customize your view.</h1><p>Adjust the status bar and dashboard to fit your workflow. Changes save automatically.</p></div></div>
+          <div class="page-heading"><div><p class="eyebrow">ÖZELLEŞTİRME</p><h1>Görünümü Ayarlayın</h1><p>Durum çubuğunu ve panel seçeneklerini iş akışınıza göre düzenleyin. Değişiklikler otomatik kaydedilir.</p></div></div>
           <div class="settings-layout"><div class="settings-stack">
-            <div class="settings-card"><h2>Visible providers</h2><p>All limits remain available in the dashboard.</p><div id="provider-options"></div><h3>Individual quota indicators</h3><div id="indicator-options"></div></div>
-            <div class="settings-card"><h2>Status bar style</h2><div class="style-options"><label><input type="radio" name="statusBarStyle" value="full"><span><strong>Full</strong><small>Codex 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="compact"><span><strong>Compact</strong><small>⌘ 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="icon"><span><strong>Icons only</strong><small>OpenAI · Gemini · Claude</small></span></label></div><div id="toggle-options"></div></div>
-            <div class="settings-card"><h2>Dashboard and updates</h2><label class="setting-row"><span><strong>Dashboard theme</strong><small>Automatic mode follows your VS Code theme.</small></span><select id="panelTheme" aria-label="Dashboard theme"><option value="auto">Match VS Code</option><option value="dark">Dark</option><option value="light">Light</option></select></label><label class="setting-row"><span><strong>Refresh interval</strong><small>60–3600 seconds for all providers.</small></span><span class="interval-input"><input id="refreshIntervalSeconds" type="number" min="60" max="3600" step="1" aria-label="Refresh interval (seconds)"><span>sec</span></span></label></div>
-          </div><aside class="preview-card"><p class="eyebrow">LIVE PREVIEW</p><h2>Your status bar</h2><p>This preview reflects your current settings.</p><div class="editor-preview"><div class="editor-tabs"><i></i><i></i><i></i><span>workspace</span></div><div class="editor-lines"><span></span><span></span><span></span><span></span></div><div id="bar-preview" class="bar-preview"></div></div><p class="preview-caption">Colors reflect the remaining quota:</p><div class="thresholds"><span class="warning">● &lt; 30%</span><span class="orange">● &lt; 20%</span><span class="danger">● &lt; 10%</span></div><p class="preview-caption">If all indicators are hidden, open the dashboard from the Command Palette: “AI Limit Status: Open Dashboard.”</p></aside></div>
+            <div class="settings-card"><h2>Görünen Sağlayıcılar</h2><p>Tüm limitler panelde görüntülenmeye devam eder.</p><div id="provider-options"></div><h3>Bireysel Kota Göstergeleri</h3><div id="indicator-options"></div></div>
+            <div class="settings-card"><h2>Durum Çubuğu Stili</h2><div class="style-options"><label><input type="radio" name="statusBarStyle" value="full"><span><strong>Tam</strong><small>Codex 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="compact"><span><strong>Kompakt</strong><small>⌘ 72% ◯ · 3h</small></span></label><label><input type="radio" name="statusBarStyle" value="icon"><span><strong>Yalnızca İkon</strong><small>OpenAI · Gemini · Claude</small></span></label></div><div id="toggle-options"></div></div>
+            <div class="settings-card"><h2>Panel ve Güncellemeler</h2><label class="setting-row"><span><strong>Tema</strong><small>Otomatik mod VS Code temanızı takip eder.</small></span><select id="panelTheme" aria-label="Dashboard theme"><option value="auto">VS Code ile Uyumlu</option><option value="dark">Koyu</option><option value="light">Açık</option></select></label><label class="setting-row"><span><strong>Yenileme Aralığı</strong><small>Tüm sağlayıcılar için 60–3600 saniye.</small></span><span class="interval-input"><input id="refreshIntervalSeconds" type="number" min="60" max="3600" step="1" aria-label="Refresh interval (seconds)"><span>sn</span></span></label></div>
+          </div><aside class="preview-card"><p class="eyebrow">CANLI ÖNİZLEME</p><h2>Durum Çubuğunuz</h2><p>Bu önizleme geçerli ayarlarınızı yansıtır.</p><div class="editor-preview"><div class="editor-tabs"><i></i><i></i><i></i><span>workspace</span></div><div class="editor-lines"><span></span><span></span><span></span><span></span></div><div id="bar-preview" class="bar-preview"></div></div><p class="preview-caption">Kalan kotaya göre renkler:</p><div class="thresholds"><span class="warning">● &lt; 30%</span><span class="orange">● &lt; 20%</span><span class="danger">● &lt; 10%</span></div><p class="preview-caption">Tüm göstergeler gizliyse Komut Paletinden açabilirsiniz: “AI Limit Status: Open Dashboard.”</p></aside></div>
         </section>
       </main>
-    </div>`;
+    </div>
+    <div id="oauth-modal" class="modal-backdrop" hidden></div>`;
 
   function switchSection(next) {
     section = next;
@@ -123,64 +152,225 @@
     window.scrollTo(0, 0);
   }
 
+  function openAddAccountModal(provider) {
+    modalProvider = provider || "gemini";
+    modalOpen = true;
+    modalTab = "oauth";
+    callbackDraft = "";
+    renderOAuthModal();
+    send("prepareOAuth", { provider: modalProvider });
+  }
+
+  function closeAddAccountModal() {
+    modalOpen = false;
+    callbackDraft = "";
+    jsonDraft = "";
+    document.getElementById("oauth-modal").hidden = true;
+    send("cancelOAuth");
+  }
+
+  function renderOAuthModal() {
+    const modalEl = document.getElementById("oauth-modal");
+    if (!modalOpen) {
+      modalEl.hidden = true;
+      return;
+    }
+    modalEl.hidden = false;
+
+    const session =
+      state?.oauthSession && state.oauthSession.provider === modalProvider
+        ? state.oauthSession
+        : undefined;
+    const authUrl = session?.authUrl ?? "Generating authorization link…";
+    const statusMsg =
+      session?.message ??
+      "Preparing OAuth PKCE session and local callback listener…";
+    const isError = session?.status === "error";
+
+    modalEl.innerHTML = `
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">ADD ACCOUNT</p>
+            <h2 id="modal-title">Connect ${escape(providerFullNames[modalProvider] ?? modalProvider)}</h2>
+          </div>
+          <button class="modal-close" data-close-modal="true" aria-label="Close modal">✕</button>
+        </div>
+
+        <div class="modal-provider-tabs">
+          ${["gemini", "codex", "claude"]
+            .map(
+              (p) => `
+            <button class="provider-tab ${modalProvider === p ? "active" : ""}" data-modal-provider="${p}">
+              <span class="provider-symbol">${providerIcon(p)}</span>
+              <span>${escape(providerFullNames[p])}</span>
+            </button>`,
+            )
+            .join("")}
+        </div>
+
+        <div class="modal-mode-tabs">
+          <button class="mode-tab ${modalTab === "oauth" ? "active" : ""}" data-modal-tab="oauth">🔗 OAuth Link &amp; Callback URL</button>
+          <button class="mode-tab ${modalTab === "json" ? "active" : ""}" data-modal-tab="json">{ } Import Token / JSON</button>
+        </div>
+
+        ${
+          modalTab === "oauth"
+            ? `
+          <div class="modal-body">
+            <div class="oauth-step">
+              <div class="oauth-step-header">
+                <span class="step-badge">1</span>
+                <div>
+                  <strong>Open or copy the OAuth authorization link</strong>
+                  <small>Sign in with your ${escape(names[modalProvider])} account in the browser.</small>
+                </div>
+              </div>
+              <div class="oauth-url-row">
+                <input type="text" class="oauth-input" id="oauth-auth-url" readonly value="${escape(authUrl)}" aria-label="Authorization link">
+                <button class="button" data-copy-oauth="true" ${!session?.authUrl ? "disabled" : ""}>Copy Link</button>
+                <button class="button primary" data-open-oauth="true" ${!session?.authUrl ? "disabled" : ""}>Open in Browser ↗</button>
+              </div>
+            </div>
+
+            <div class="oauth-step">
+              <div class="oauth-step-header">
+                <span class="step-badge">2</span>
+                <div>
+                  <strong>Paste the Callback / Redirect URL (Geri Dönüş Linki)</strong>
+                  <small>After signing in, if the browser redirects to <code>${escape(session?.redirectUri ?? "http://localhost:...")}</code>, copy that full URL from the address bar and paste it here to confirm.</small>
+                </div>
+              </div>
+              <div class="oauth-callback-row">
+                <input type="text" class="oauth-input" id="oauth-callback-input" placeholder="${escape(session?.redirectUri ?? "http://localhost:1456/oauth-callback")}?code=...&state=..." value="${escape(callbackDraft)}" aria-label="Callback URL">
+                <button class="button primary" data-complete-oauth="true" ${busy ? "disabled" : ""}>Complete Login ✓</button>
+              </div>
+            </div>
+
+            <div class="oauth-status-box ${isError ? "error" : ""}">
+              <span class="status-dot"></span>
+              <span>${escape(statusMsg)}</span>
+            </div>
+          </div>
+        `
+            : `
+          <div class="modal-body">
+            <div class="oauth-step">
+              <div class="oauth-step-header">
+                <span class="step-badge">{ }</span>
+                <div>
+                  <strong>Paste ${escape(names[modalProvider])} credentials JSON</strong>
+                  <small>Paste the contents of <code>auth.json</code>, <code>oauth_creds.json</code>, <code>.credentials.json</code>, or an object with <code>access_token</code> and <code>refresh_token</code>.</small>
+                </div>
+              </div>
+              <textarea id="oauth-json-input" class="oauth-textarea" rows="6" placeholder='{"access_token": "...", "refresh_token": "..."}'>${escape(jsonDraft)}</textarea>
+              <div class="modal-actions-end">
+                <button class="button primary" data-import-json="true" ${busy ? "disabled" : ""}>Import Account ✓</button>
+              </div>
+            </div>
+          </div>
+        `
+        }
+      </div>
+    `;
+  }
+
   function renderLimits() {
-    const connected = state.providers.filter(
-      (p) => p.account?.connected,
-    ).length;
-    const allWindows = state.providers.flatMap((p) => p.windows);
-    const lowest = allWindows.length
-      ? Math.min(...allWindows.map((w) => w.remainingPercent))
-      : undefined;
-    document.getElementById("summary").innerHTML =
-      `<div class="summary-card"><span>Connected providers</span><strong>${connected}<small> / 3</small></strong><p>Active sessions</p></div><div class="summary-card"><span>Lowest remaining quota</span><strong class="${lowest === undefined ? "" : tone(lowest)}">${lowest === undefined ? "—" : lowest + "%"}</strong><p>Across all usage windows</p></div><div class="summary-card"><span>Automatic refresh</span><strong>${Math.round((state.settings.refreshIntervalSeconds / 60) * 10) / 10}<small> min</small></strong><p>Refresh interval</p></div>`;
-    document.getElementById("providers").innerHTML = state.providers
-      .map((provider) => {
-        const account = provider.account;
-        return `<article class="provider-card ${provider.id}"><div class="provider-heading"><span class="provider-symbol">${providerIcon(provider.id)}</span><div><h2>${escape(provider.name)}</h2><span class="source">${escape(provider.source)}</span></div><span class="pill ${provider.error ? "offline" : "online"}">${provider.error ? "Action needed" : provider.windows.length ? "Updated" : "Waiting"}</span></div><div class="provider-account"><span>${escape(account?.email ?? (account?.connected ? "Active session" : "No session information"))}</span>${account?.plan ? `<span class="plan">${escape(account.plan)}</span>` : ""}</div><div class="quotas">${provider.windows.map((window) => `<div class="quota ${tone(window.remainingPercent)}"><div class="quota-title"><span>${escape(window.label)}</span><strong class="quota-percentage"><span>${percent(window.remainingPercent)}%</span>${renderProgressRing(window.remainingPercent, tone(window.remainingPercent), 16)}<small>left</small></strong></div><progress max="100" value="${percent(window.remainingPercent)}" aria-label="${escape(window.label)} remaining percentage"></progress><div class="quota-reset"><span>↻ Resets in ${escape(window.resetLabel)}</span><time>${window.resetsAt ? escape(dateTime(window.resetsAt * 1000)) : "Reset time unavailable"}</time></div></div>`).join("") || `<div class="empty-quota"><span>◌</span><p>No limit data yet.</p></div>`}</div>${provider.error ? `<div class="provider-error">${escape(provider.error)}</div>` : ""}<div class="provider-footer"><span>${escape(dateTime(provider.updatedAt))}</span><button class="text-button" data-login="${provider.id}">Manage account ↗</button></div></article>`;
-      })
-      .join("");
-    document.getElementById("reset-card").innerHTML =
-      state.resetCredits > 0
-        ? `<div class="reset-card"><div><strong>↻ ${state.resetCredits} Codex reset credits</strong><p>Reset an eligible limit without waiting. Confirmation is required.</p></div><button class="button" data-action="reset">Use a credit</button></div>`
-        : "";
+    const resetEl = document.getElementById("reset-card");
+    if (resetEl) {
+      resetEl.innerHTML =
+        state.resetCredits > 0
+          ? `<div class="reset-card"><div><strong>↻ ${state.resetCredits} Codex sıfırlama kredisi</strong><p>Beklemeden uygun bir limiti sıfırlayın. Onay istenir.</p></div><button class="button" data-action="reset">Kredi Kullan</button></div>`
+          : "";
+    }
+  }
+
+  function renderAccountQuotas(account) {
+    const wins = account.windows ?? [];
+    if (wins.length === 0) {
+      if (account.error) {
+        return `<div class="saved-account-quotas empty"><span class="quota-err-text">${escape(account.error)}</span></div>`;
+      }
+      return `<div class="saved-account-quotas empty"><span>Kota bilgisi bekleniyor — yenilemek için ↻ butonuna tıklayın</span></div>`;
+    }
+
+    const hasZeroWeekly = wins.some(
+      (w) =>
+        /week|7d/i.test(w.label) &&
+        percent(w.remainingPercent) === 0,
+    );
+
+    return `<div class="saved-account-quotas">
+      ${wins
+        .map((w) => {
+          let pct = percent(w.remainingPercent);
+          if (hasZeroWeekly && /5\s?[- ]?hour|5h/i.test(w.label)) {
+            pct = 0;
+          }
+          const t = tone(pct);
+          return `<div class="mini-quota ${t}">
+            <div class="mini-quota-top">
+              <span class="mini-quota-label">${escape(w.label)}</span>
+              <span class="mini-quota-val"><strong>${pct}%</strong> ${renderProgressRing(pct, t, 13)} <small>↻ ${escape(w.resetLabel)}</small></span>
+            </div>
+            <progress max="100" value="${pct}"></progress>
+          </div>`;
+        })
+        .join("")}
+    </div>`;
   }
 
   function renderAccounts() {
-    document.getElementById("active-accounts").innerHTML = state.providers
-      .map((p) => {
-        const a = p.account;
-        return `<article class="account-card ${p.id}"><div class="provider-heading"><span class="provider-symbol">${providerIcon(p.id)}</span><h2>${escape(p.name)}</h2><span class="pill ${a?.connected ? "online" : "offline"}">${a?.connected ? "Connected" : "Not connected"}</span></div><div class="account-avatar">${escape((a?.email ?? a?.name ?? "?").slice(0, 1).toUpperCase())}</div><h3>${escape(a?.name ?? a?.email ?? "Sign in")}</h3><p class="email">${escape(a?.name ? a.email : (a?.plan ?? "Subscription session"))}</p>${a?.name && a.plan ? `<span class="plan">${escape(a.plan)}</span>` : ""}<p class="account-detail">${escape(a?.detail ?? "Session details are read from the provider's own app.")}</p><button class="button wide" data-login="${p.id}">${a?.connected ? "Add account" : "Sign in"} ↗</button></article>`;
-      })
-      .join("");
+    document.querySelectorAll("[data-filter]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.filter === accountFilter);
+    });
+
+    const filteredAccounts =
+      accountFilter === "all"
+        ? state.accounts
+        : state.accounts.filter((a) => a.provider === accountFilter);
+
     document.getElementById("account-count").textContent =
-      `${state.accounts.length} ${state.accounts.length === 1 ? "account" : "accounts"}`;
-    document.getElementById("account-history").innerHTML = state.accounts.length
-      ? state.accounts
+      `${filteredAccounts.length} ${filteredAccounts.length === 1 ? "hesap" : "hesap"}`;
+
+    document.getElementById("account-history").innerHTML = filteredAccounts.length
+      ? filteredAccounts
           .map((account) => {
-            const provider = names[account.provider];
-            const status = account.active
-              ? "Current account"
-              : account.sessionSaved
-                ? "Session saved securely"
-                : account.provider === "gemini"
-                  ? "Managed by Antigravity"
-                  : "Sign-in required";
-            const badge = account.active
-              ? "Active"
-              : account.sessionSaved
-                ? "Saved"
-                : "Known";
-            const action = account.active
-              ? '<button class="button account-switch" disabled aria-current="true">Current account</button>'
-              : account.sessionSaved
-                ? `<button class="button primary account-switch" data-switch-account="${account.provider}" data-account-id="${account.id}">Switch account <span aria-hidden="true">→</span></button>`
-                : account.provider === "gemini"
-                  ? `<button class="button primary account-switch" data-switch-account="${account.provider}" data-account-id="${account.id}">Manage in Antigravity <span aria-hidden="true">↗</span></button>`
-                  : `<button class="button primary account-switch" data-login="${account.provider}" data-account-id="${account.id}">Sign in to save session <span aria-hidden="true">↗</span></button>`;
-            return `<article class="saved-account-card ${account.provider}${account.active ? " is-active" : ""}"><div class="saved-account-top"><span class="provider-symbol">${providerIcon(account.provider)}</span><span class="saved-account-provider">${escape(provider)}</span><span class="pill ${account.active ? "online" : ""}">${badge}</span></div><div class="saved-account-identity"><div class="account-avatar">${escape((account.email ?? account.name ?? "?").slice(0, 1).toUpperCase())}</div><div class="saved-account-copy"><h3 title="${escape(account.email)}">${escape(account.email)}</h3><p>${escape(account.plan ?? "Subscription account")}</p></div></div><div class="saved-account-status"><span class="status-mark ${account.active ? "active" : account.sessionSaved ? "saved" : "managed"}" aria-hidden="true"></span><span>${status}</span><time datetime="${escape(account.lastSeen)}">Last used ${escape(dateTime(account.lastSeen))}</time></div><div class="saved-account-actions">${action}<button class="text-button remove-account" data-forget="${account.id}" title="Remove this account" aria-label="Remove ${escape(account.email)}">Remove</button></div></article>`;
+            const provider = providerFullNames[account.provider] ?? names[account.provider];
+            const badge = account.active ? "● Aktif" : "Hazır";
+            const switchBtn = account.active
+              ? '<button class="button account-switch" disabled aria-current="true">✓ Aktif Hesap</button>'
+              : `<button class="button primary account-switch" data-switch-account="${account.provider}" data-account-id="${account.id}">Hesaba Geç →</button>`;
+
+            return `<article class="saved-account-card ${account.provider}${account.active ? " is-active" : ""}">
+              <div class="saved-account-top">
+                <span class="provider-symbol">${providerIcon(account.provider)}</span>
+                <span class="saved-account-provider">${escape(provider)}</span>
+                ${account.plan ? `<span class="plan">${escape(account.plan)}</span>` : ""}
+                <span class="pill ${account.active ? "online" : ""}">${badge}</span>
+              </div>
+              <div class="saved-account-identity">
+                <div class="account-avatar">${escape((account.email ?? account.name ?? "?").slice(0, 1).toUpperCase())}</div>
+                <div class="saved-account-copy">
+                  <h3 title="${escape(account.email)}">${escape(account.email)}</h3>
+                  <p>${escape(account.name ? `${account.name} · ` : "")}${escape(account.plan ?? "Oturum")}</p>
+                </div>
+              </div>
+              ${renderAccountQuotas(account)}
+              <div class="saved-account-status">
+                <span class="status-mark ${account.active ? "active" : "saved"}" aria-hidden="true"></span>
+                <span>${account.active ? "Şu an aktif kullanımda" : "Beklemede · Geçişe hazır"}</span>
+                <time>${escape(account.updatedAt ? `Güncellendi: ${account.updatedAt}` : `Son görülme: ${dateTime(account.lastSeen)}`)}</time>
+              </div>
+              <div class="saved-account-actions">
+                ${switchBtn}
+                <button class="button icon-btn" data-refresh-account="${account.id}" title="${escape(account.email)} kotasını yenile">↻</button>
+                <button class="text-button remove-account" data-forget="${account.id}" title="Bu hesabı kaldır">Kaldır</button>
+              </div>
+            </article>`;
           })
           .join("")
-      : '<div class="empty-accounts"><span class="empty-accounts-icon" aria-hidden="true">◎</span><strong>No saved accounts yet</strong><p>Sign in with a provider above. Accounts you add will appear here for quick switching.</p></div>';
+      : '<div class="empty-accounts"><span class="empty-accounts-icon" aria-hidden="true">◎</span><strong>Bu filtrede kayıtlı hesap yok</strong><p>Yetkilendirme bağlantısı ve geri dönüş linkiyle hesap eklemek için yukarıdaki "+ Yeni Hesap Ekle" butonuna tıklayın.</p></div>';
   }
 
   const checkbox = (key, value, label, description) =>
@@ -261,7 +451,12 @@
       const iconOnly = s.statusBarStyle === "icon";
       const icon = s.showIcons || iconOnly ? providerIcon(p.id) + " " : "";
       const ringHtml = window
-        ? " " + renderProgressRing(window.remainingPercent, s.colorize ? tone(window.remainingPercent) : "", 14)
+        ? " " +
+          renderProgressRing(
+            window.remainingPercent,
+            s.colorize ? tone(window.remainingPercent) : "",
+            14,
+          )
         : "";
       const windowText = window
         ? window.remainingPercent +
@@ -291,11 +486,77 @@
       indicators.join("") || "<span>No indicators enabled</span>";
   }
 
+  document.addEventListener("input", (event) => {
+    if (event.target.id === "oauth-callback-input") {
+      callbackDraft = event.target.value;
+    } else if (event.target.id === "oauth-json-input") {
+      jsonDraft = event.target.value;
+    }
+  });
+
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
-    if (!button) return;
+    if (!button) {
+      if (event.target.id === "oauth-modal") {
+        closeAddAccountModal();
+      }
+      return;
+    }
     if (button.dataset.section) {
       switchSection(button.dataset.section);
+      return;
+    }
+    if (button.dataset.filter) {
+      accountFilter = button.dataset.filter;
+      renderAccounts();
+      return;
+    }
+    if (button.dataset.openAdd) {
+      openAddAccountModal(button.dataset.openAdd);
+      return;
+    }
+    if (button.dataset.closeModal) {
+      closeAddAccountModal();
+      return;
+    }
+    if (button.dataset.modalProvider) {
+      modalProvider = button.dataset.modalProvider;
+      callbackDraft = "";
+      renderOAuthModal();
+      send("prepareOAuth", { provider: modalProvider });
+      return;
+    }
+    if (button.dataset.modalTab) {
+      modalTab = button.dataset.modalTab;
+      renderOAuthModal();
+      return;
+    }
+    if (button.dataset.copyOauth) {
+      const url = state?.oauthSession?.authUrl;
+      if (url) send("copyText", { text: url });
+      return;
+    }
+    if (button.dataset.openOauth) {
+      const url = state?.oauthSession?.authUrl;
+      if (url) send("openExternalUrl", { url });
+      return;
+    }
+    if (button.dataset.completeOauth) {
+      const inputEl = document.getElementById("oauth-callback-input");
+      const callbackUrl = inputEl ? inputEl.value.trim() : callbackDraft.trim();
+      send("completeOAuth", {
+        sessionId: state?.oauthSession?.sessionId ?? "",
+        callbackUrl,
+      });
+      return;
+    }
+    if (button.dataset.importJson) {
+      const areaEl = document.getElementById("oauth-json-input");
+      const rawJson = areaEl ? areaEl.value.trim() : jsonDraft.trim();
+      send("importAccountJson", {
+        provider: modalProvider,
+        rawJson,
+      });
       return;
     }
     if (busy) return;
@@ -304,15 +565,13 @@
         provider: button.dataset.switchAccount,
         accountId: button.dataset.accountId,
       });
-    else if (button.dataset.login)
-      send("login", {
-        provider: button.dataset.login,
-        accountId: button.dataset.accountId,
-      });
+    else if (button.dataset.refreshAccount)
+      send("refreshAccount", { accountId: button.dataset.refreshAccount });
     else if (button.dataset.forget)
       send("forget", { id: button.dataset.forget });
     else if (button.dataset.action) send(button.dataset.action);
   });
+
   document.addEventListener("change", (event) => {
     if (!state) return;
     const input = event.target;
@@ -342,26 +601,39 @@
       send("save", { settings: patch });
     }
   });
+
   window.addEventListener("message", ({ data }) => {
     if (data.type === "notice") {
       const notice = document.getElementById("notice");
       notice.textContent = data.message;
       notice.classList.toggle("error", data.error === true);
       notice.hidden = false;
+      if (!data.error && modalOpen && /added|imported/i.test(data.message)) {
+        modalOpen = false;
+        document.getElementById("oauth-modal").hidden = true;
+      }
       return;
     }
     if (data.type !== "state") return;
+    const hadSession = !!state?.oauthSession;
     state = data.state;
     busy = data.busy;
+    if (hadSession && !state.oauthSession && modalOpen && modalTab === "oauth") {
+      // Automatic local callback completed OAuth!
+      modalOpen = false;
+    }
     renderLimits();
     renderAccounts();
     syncSettings();
+    renderOAuthModal();
     document.getElementById("sync-state").textContent = state.refreshing
-      ? "Refreshing…"
-      : "Automatic refresh is on";
+      ? "Refreshing quotas…"
+      : "Multi-account sync active";
     document.getElementById("refresh").disabled = busy || state.refreshing;
     document
-      .querySelectorAll("[data-login], [data-switch-account], [data-forget], [data-action=reset]")
+      .querySelectorAll(
+        "[data-switch-account], [data-refresh-account], [data-forget], [data-action=reset]",
+      )
       .forEach((button) => {
         button.disabled = busy || state.refreshing;
       });
