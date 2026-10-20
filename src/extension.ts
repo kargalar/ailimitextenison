@@ -730,12 +730,15 @@ export function activate(context: vscode.ExtensionContext): void {
         resetLabel: formatRemainingTime(entry.resetsAt),
       }));
 
-    const codexWins =
-      windows.length > 0
+    const codexWins = accounts.isManuallySwitched("codex")
+      ? (activeCodexAcc?.windows ?? [])
+      : windows.length > 0
         ? quotaWindows(windows)
         : (activeCodexAcc?.windows ?? []);
     const geminiWins =
-      antigravityGroups.length > 0
+      accounts.isManuallySwitched("gemini")
+        ? (activeGeminiAcc?.windows ?? [])
+        : antigravityGroups.length > 0
         ? antigravityGroups.flatMap((group) => {
             const weekly = group.buckets.find((b) => b.window === "weekly");
             const isWeeklyZero =
@@ -760,8 +763,9 @@ export function activate(context: vscode.ExtensionContext): void {
             });
           })
         : (activeGeminiAcc?.windows ?? []);
-    const claudeWins =
-      claudeWindows.length > 0
+    const claudeWins = accounts.isManuallySwitched("claude")
+      ? (activeClaudeAcc?.windows ?? [])
+      : claudeWindows.length > 0
         ? quotaWindows(claudeWindows)
         : (activeClaudeAcc?.windows ?? []);
 
@@ -851,12 +855,15 @@ export function activate(context: vscode.ExtensionContext): void {
     switchAccount: async (provider, id) => {
       await accounts.switchTo(id, provider);
       await accounts.refreshAccountQuota(id);
-      await Promise.all([
-        refresh(false),
-        refreshClaude(false),
-        refreshAntigravity(false),
-      ]);
+      dashboard?.publish();
       const target = accounts.list().find((a) => a.id === id);
+      const reload = await vscode.window.showInformationMessage(
+        `${provider.toUpperCase()} account changed. Reload the window to apply it to the running app?`,
+        "Reload Window",
+      );
+      if (reload === "Reload Window") {
+        await vscode.commands.executeCommand("workbench.action.reloadWindow");
+      }
       return target?.email ?? provider;
     },
     refreshAccount: async (id) => {

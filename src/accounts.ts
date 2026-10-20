@@ -14,6 +14,10 @@ import {
   ProviderId,
   QuotaWindow,
 } from "./dashboard-model";
+import {
+  formatCodexRefreshError,
+  normalizeCodexTokenExpiry,
+} from "./token-utils";
 
 const run = promisify(execFile);
 const HISTORY_KEY = "aiLimitStatus.accountHistory.v2";
@@ -311,6 +315,8 @@ async function writeWindowsCredentialBytes(
 export class AccountDirectory {
   private current = new Map<ProviderId, AccountIdentity>();
   private tokensCache = new Map<string, StoredAccountTokens>();
+  private tokenRefreshes = new Map<string, Promise<StoredAccountTokens>>();
+  private manuallySwitchedProviders = new Set<ProviderId>();
   private activeOAuth?: ActiveOAuthFlow;
   private initialized = false;
 
@@ -321,6 +327,28 @@ export class AccountDirectory {
 
   get(provider: ProviderId): AccountIdentity | undefined {
     return this.current.get(provider);
+  }
+
+  private cacheTokens(
+    id: string,
+    tokens: StoredAccountTokens,
+  ): StoredAccountTokens {
+    const normalized =
+      tokens.provider === "codex"
+        ? {
+            ...tokens,
+            expiresAt: normalizeCodexTokenExpiry(
+              tokens.accessToken,
+              tokens.expiresAt,
+            ),
+          }
+        : tokens;
+    this.tokensCache.set(id, normalized);
+    return normalized;
+  }
+
+  isManuallySwitched(provider: ProviderId): boolean {
+    return this.manuallySwitchedProviders.has(provider);
   }
 
   getOAuthSessionView(): OAuthSessionView | undefined {
@@ -379,8 +407,11 @@ export class AccountDirectory {
         if (parsed.tokens && typeof parsed.tokens === "object") {
           for (const [id, tok] of Object.entries(parsed.tokens)) {
             if (tok && typeof tok.accessToken === "string") {
-              this.tokensCache.set(id, tok);
-              await this.context.secrets.store(secretKey(id), JSON.stringify(tok));
+              const normalized = this.cacheTokens(id, tok);
+              await this.context.secrets.store(
+                secretKey(id),
+                JSON.stringify(normalized),
+              );
             }
           }
         }
@@ -396,7 +427,7 @@ export class AccountDirectory {
           try {
             const tok = JSON.parse(rawSecret) as StoredAccountTokens;
             if (tok && typeof tok.accessToken === "string") {
-              this.tokensCache.set(id, tok);
+              this.cacheTokens(id, tok);
             }
           } catch {
             // Ignore invalid secret
@@ -451,8 +482,11 @@ export class AccountDirectory {
   ): Promise<KnownAccount> {
     const email = identity.email?.trim() || `${identity.provider}-user`;
     const id = computeAccountId(identity.provider, email);
-    this.tokensCache.set(id, tokens);
-    await this.context.secrets.store(secretKey(id), JSON.stringify(tokens));
+    const normalizedTokens = this.cacheTokens(id, tokens);
+    await this.context.secrets.store(
+      secretKey(id),
+      JSON.stringify(normalizedTokens),
+    );
 
     const accounts = this.context.globalState.get<KnownAccount[]>(
       HISTORY_KEY,
@@ -557,8 +591,6 @@ export class AccountDirectory {
             typeof authClaim?.chatgpt_plan_type === "string"
               ? authClaim.chatgpt_plan_type
               : undefined;
-          const expSeconds =
-            typeof claims?.exp === "number" ? claims.exp : undefined;
           if (email) {
             await this.storeAccountWithTokens(
               {
@@ -578,7 +610,7 @@ export class AccountDirectory {
                   (typeof authClaim?.chatgpt_account_id === "string"
                     ? authClaim.chatgpt_account_id
                     : undefined),
-                expiresAt: expSeconds ? expSeconds * 1000 : undefined,
+                expiresAt: normalizeCodexTokenExpiry(accessToken),
               },
               true,
             );
@@ -905,6 +937,7 @@ export class AccountDirectory {
     let changed = false;
 
     for (const identity of identities) {
+      if (this.manuallySwitchedProviders.has(identity.provider)) continue;
       this.current.set(identity.provider, identity);
       if (!identity.connected || !identity.email) continue;
       const id = computeAccountId(identity.provider, identity.email);
@@ -1517,6 +1550,7 @@ export class AccountDirectory {
         refreshToken,
         idToken,
         accountId,
+        expiresAt: normalizeCodexTokenExpiry(accessToken),
         raw: rawJson,
       },
       false,
@@ -1595,10 +1629,11 @@ export class AccountDirectory {
         client_id: CODEX_CLIENT_ID,
       }),
     });
+    const responseBody = await res.text();
     if (!res.ok) {
-      throw new Error(`Codex token refresh failed (${res.status})`);
+      throw new Error(formatCodexRefreshError(res.status, responseBody));
     }
-    const data = (await res.json()) as Record<string, unknown>;
+    const data = JSON.parse(responseBody) as Record<string, unknown>;
     const accessToken =
       typeof data.access_token === "string" ? data.access_token : "";
     if (!accessToken) {
@@ -1622,44 +1657,69 @@ export class AccountDirectory {
     tokens: StoredAccountTokens,
     forceRefresh = false,
   ): Promise<StoredAccountTokens> {
+    const cachedTokens = this.tokensCache.get(id);
+    const tokenSnapshotIsStale =
+      cachedTokens !== undefined &&
+      (cachedTokens.accessToken !== tokens.accessToken ||
+        cachedTokens.refreshToken !== tokens.refreshToken);
+    const latestTokens = cachedTokens ?? tokens;
     const isExpired =
-      forceRefresh ||
-      !tokens.accessToken ||
-      (tokens.expiresAt !== undefined &&
-        tokens.expiresAt <= Date.now() + 2 * 60 * 1000);
+      (!tokenSnapshotIsStale && forceRefresh) ||
+      !latestTokens.accessToken ||
+      (latestTokens.expiresAt !== undefined &&
+        latestTokens.expiresAt <= Date.now() + 2 * 60 * 1000);
 
-    if (!isExpired || !tokens.refreshToken) {
-      return tokens;
+    if (!isExpired || !latestTokens.refreshToken) {
+      return latestTokens;
     }
 
+    const pendingRefresh = this.tokenRefreshes.get(id);
+    if (pendingRefresh) {
+      return pendingRefresh;
+    }
+
+    const refresh = this.refreshAndStoreTokens(id, latestTokens);
+    this.tokenRefreshes.set(id, refresh);
+    try {
+      return await refresh;
+    } finally {
+      if (this.tokenRefreshes.get(id) === refresh) {
+        this.tokenRefreshes.delete(id);
+      }
+    }
+  }
+
+  private async refreshAndStoreTokens(
+    id: string,
+    tokens: StoredAccountTokens,
+  ): Promise<StoredAccountTokens> {
+    if (!tokens.refreshToken) return tokens;
+
+    let updated: StoredAccountTokens;
     if (tokens.provider === "gemini") {
       const refreshed = await this.refreshGeminiAccessToken(tokens.refreshToken);
-      const updated: StoredAccountTokens = {
+      updated = {
         ...tokens,
         accessToken: refreshed.accessToken,
         idToken: refreshed.idToken ?? tokens.idToken,
         expiresAt: refreshed.expiresAt,
       };
-      this.tokensCache.set(id, updated);
-      await this.context.secrets.store(secretKey(id), JSON.stringify(updated));
-      return updated;
-    }
-
-    if (tokens.provider === "codex") {
+    } else if (tokens.provider === "codex") {
       const refreshed = await this.refreshCodexAccessToken(tokens.refreshToken);
-      const updated: StoredAccountTokens = {
+      updated = {
         ...tokens,
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
         idToken: refreshed.idToken ?? tokens.idToken,
         expiresAt: refreshed.expiresAt,
       };
-      this.tokensCache.set(id, updated);
-      await this.context.secrets.store(secretKey(id), JSON.stringify(updated));
-      return updated;
+    } else {
+      return tokens;
     }
 
-    return tokens;
+    this.cacheTokens(id, updated);
+    await this.context.secrets.store(secretKey(id), JSON.stringify(updated));
+    return updated;
   }
 
   async refreshAllAccountQuotas(): Promise<void> {
@@ -1738,6 +1798,7 @@ export class AccountDirectory {
     identity?: AccountIdentity,
   ): Promise<void> {
     await this.ensureInitialized();
+    if (this.manuallySwitchedProviders.has(provider)) return;
     const accounts = this.context.globalState.get<KnownAccount[]>(
       HISTORY_KEY,
       [],
@@ -2102,6 +2163,7 @@ export class AccountDirectory {
     });
 
     await this.saveAccountsList(accounts);
+    this.manuallySwitchedProviders.add(provider);
   }
 
   private async switchCodexAccount(tokens: StoredAccountTokens): Promise<void> {

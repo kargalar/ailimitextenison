@@ -2,7 +2,7 @@
   "name": "ai-limit-status",
   "displayName": "AI Limit Status",
   "description": "Displays Codex, Gemini, Argon, Other, and Claude subscription limits in one VS Code extension.",
-  "version": "1.4.2",
+  "version": "1.4.5",
   "publisher": "local-tools",
   "license": "MIT",
   "engines": {
@@ -301,6 +301,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "check-types": "tsc -p ./ --noEmit",
+    "test": "npm run compile && node --test scripts/*.test.cjs",
     "build:font": "node scripts/build-font.js",
     "package": "vsce package"
   },
